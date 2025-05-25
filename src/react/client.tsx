@@ -47,6 +47,7 @@ const VERIFIER_STORAGE_KEY = "__convexAuthOAuthVerifier";
 const JWT_STORAGE_KEY = "__convexAuthJWT";
 const REFRESH_TOKEN_STORAGE_KEY = "__convexAuthRefreshToken";
 const SERVER_STATE_FETCH_TIME_STORAGE_KEY = "__convexAuthServerStateFetchTime";
+const TOKEN_SUB_CLAIM_DIVIDER = ".";
 
 export function AuthProvider({
   client,
@@ -95,7 +96,9 @@ export function AuthProvider({
         | { shouldStore: false; tokens: { token: string } }
         | { shouldStore: boolean; tokens: null },
     ) => {
-      const wasAuthenticated = token.current !== null;
+      const oldUserId = token.current
+        ? decodeJwtSub(token.current).split(TOKEN_SUB_CLAIM_DIVIDER)[0]
+        : null;
       let newToken: string | null;
       if (args.tokens === null) {
         token.current = null;
@@ -114,7 +117,11 @@ export function AuthProvider({
         }
         newToken = value;
       }
-      if (wasAuthenticated !== (newToken !== null)) {
+
+      const newUserId = newToken
+        ? decodeJwtSub(newToken).split(TOKEN_SUB_CLAIM_DIVIDER)[0]
+        : null;
+      if (oldUserId !== newUserId) {
         await onChange?.();
       }
       setTokenState(newToken);
@@ -562,4 +569,20 @@ function browserRemoveEventListener<K extends keyof WindowEventMap>(
   options?: boolean | EventListenerOptions,
 ): void {
   window.removeEventListener?.(type, listener, options);
+}
+
+function decodeJwtSub(token: string): string {
+  try {
+    const base64Url = token.split(".")[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join(""),
+    );
+    return JSON.parse(jsonPayload).sub;
+  } catch {
+    return "";
+  }
 }
