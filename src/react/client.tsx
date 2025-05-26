@@ -92,9 +92,17 @@ export function AuthProvider({
   const setToken = useCallback(
     async (
       args:
-        | { shouldStore: true; tokens: { token: string; refreshToken: string } }
-        | { shouldStore: false; tokens: { token: string } }
-        | { shouldStore: boolean; tokens: null },
+        | {
+            shouldStore: true;
+            tokens: { token: string; refreshToken: string };
+            invalidate?: boolean;
+          }
+        | {
+            shouldStore: false;
+            tokens: { token: string };
+            invalidate?: boolean;
+          }
+        | { shouldStore: boolean; tokens: null; invalidate?: boolean },
     ) => {
       const oldUserId = token.current
         ? decodeJwtSub(token.current).split(TOKEN_SUB_CLAIM_DIVIDER)[0]
@@ -110,10 +118,9 @@ export function AuthProvider({
       } else {
         const { token: value } = args.tokens;
         token.current = value;
-        if (args.shouldStore) {
-          const { refreshToken } = args.tokens;
+        if (args.shouldStore && "refreshToken" in args.tokens) {
           await storageSet(JWT_STORAGE_KEY, value);
-          await storageSet(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
+          await storageSet(REFRESH_TOKEN_STORAGE_KEY, args.tokens.refreshToken);
         }
         newToken = value;
       }
@@ -121,10 +128,11 @@ export function AuthProvider({
       const newUserId = newToken
         ? decodeJwtSub(newToken).split(TOKEN_SUB_CLAIM_DIVIDER)[0]
         : null;
-      if (oldUserId !== newUserId) {
+
+      if (args.invalidate ?? oldUserId !== newUserId) {
+        setTokenState(newToken);
         await onChange?.();
       }
-      setTokenState(newToken);
       setIsLoading(false);
     },
     [storageSet, storageRemove],
@@ -171,6 +179,7 @@ export function AuthProvider({
           await setToken({
             shouldStore: false,
             tokens: value === null ? null : { token: value },
+            invalidate: true,
           });
         }
       })();
@@ -221,7 +230,11 @@ export function AuthProvider({
     ) => {
       const { tokens } = await verifyCode(args);
       logVerbose(`retrieved tokens, is null: ${tokens === null}`);
-      await setToken({ shouldStore: true, tokens: tokens ?? null });
+      await setToken({
+        shouldStore: true,
+        tokens: tokens ?? null,
+        invalidate: false,
+      });
       return tokens !== null;
     },
     [client, setToken],
@@ -260,7 +273,7 @@ export function AuthProvider({
       } else if (result.tokens !== undefined) {
         const { tokens } = result;
         logVerbose(`signed in and got tokens, is null: ${tokens === null}`);
-        await setToken({ shouldStore: true, tokens });
+        await setToken({ shouldStore: true, tokens, invalidate: true });
         return { signingIn: result.tokens !== null };
       }
       return { signingIn: false };
@@ -278,7 +291,7 @@ export function AuthProvider({
       // already signed out, which is ok.
     }
     logVerbose(`signed out, erasing tokens`);
-    await setToken({ shouldStore: true, tokens: null });
+    await setToken({ shouldStore: true, tokens: null, invalidate: true });
   }, [setToken, client]);
 
   const fetchAccessToken = useCallback(
@@ -333,6 +346,7 @@ export function AuthProvider({
         await setToken({
           shouldStore: false,
           tokens: token === null ? null : { token },
+          invalidate: true,
         });
       };
 
@@ -353,7 +367,7 @@ export function AuthProvider({
               SERVER_STATE_FETCH_TIME_STORAGE_KEY,
               serverState._timeFetched.toString(),
             );
-            void setToken({ tokens, shouldStore: true });
+            void setToken({ tokens, shouldStore: true, invalidate: true });
           } else {
             void readStateFromStorage();
           }
